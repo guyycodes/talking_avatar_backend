@@ -8,7 +8,7 @@ var cors = require('cors');
 var indexRouter = require('./routes/index');
 
 var app = express();
-
+// To do - You left off attempting to access the stream from amazon Transcribe service, you needed to use the codec to decode the data frame
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));

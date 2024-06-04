@@ -1,6 +1,6 @@
 var express = require('express');
 var router = express.Router();
-var textToSpeech = require('../helpers/tts');
+var textToSpeech = require('../helpers/textToSpeach');
 
 /* GET home page. */
 router.post('/talk', function(req, res, next) {
@@ -13,7 +13,11 @@ router.post('/talk', function(req, res, next) {
     res.json({});
   });
 
-
+  {
+    "Effect": "Allow",
+    "Action": "iam:ListAttachedGroupPolicies",
+    "Resource": "arn:aws:iam::590183987690:group/TheTalkingToasterGroup"
+  }
 });
 
 module.exports = router;
