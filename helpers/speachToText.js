@@ -1,20 +1,42 @@
 require('dotenv').config({ path: '../.env' });
+const glob = require('glob').glob;
+const util = require('util');
+const promisifiedGlob = util.promisify(glob);
 const crypto = require('crypto');
 const AWS = require('aws-sdk');
 const { EventStreamCodec } = require('@smithy/eventstream-codec');
-const splitMessage = require('@smithy/eventstream-codec')
-
+const WebSocket = require('ws');
+const fs = require('fs');  // Make sure fs is defined by requiring it
+const path = require('path');
+const EventEmitter = require('events');
+class MyEmitter extends EventEmitter {}
+const myEmitter = new MyEmitter();
+ 
+global.audioFilePath = null;
 const utf8Decoder = (buffer) => new TextDecoder("utf-8").decode(buffer);
 const utf8Encoder = (text) => new TextEncoder().encode(text);
 const codec = new EventStreamCodec(utf8Encoder, utf8Decoder);
 
-const WebSocket = require('ws');
-const aws4 = require('aws4');
-const fs = require('fs');  // Make sure fs is defined by requiring it
-const path = require('path');
+(async () => { /// to-do you are connected to transcribe, but the emmter needs to emit a signal in order for the process to send its .flac audio file to aws
+    const directoryPath = path.join(__dirname, 'sendToTranscribe');
+    const pattern = "output*.flac";
+    try {
+        const files = await promisifiedGlob(path.join(directoryPath, pattern));
+        if (files.length > 0) {
+            global.audioFilePath = files[0];
+            myEmitter.emit('pathReady');
+            console.log('Using audio file:', audioFilePath,);
 
-// Path to the recorded audio file and where to save the transcript
-const audioFilePath = path.join(__dirname, 'output.wav');
+            // Start the transcription process
+            
+        } else {
+            console.log('No files found matching the pattern.');
+        }
+    } catch (err) {
+        console.error('Error finding file:', err);
+    }
+})();
+
 const transcriptFilePath = path.join(__dirname, 'transcription.txt');
 const dataFilePath = path.join(__dirname, 'data.txt');
 
@@ -98,8 +120,6 @@ const webSocketHeaders = {
 };
 
 console.log("Signed URL:", signedUrl);
-// return;
-const ws = new WebSocket(signedUrl, { headers: webSocketHeaders });
 
 function getSignatureKey(key, dateStamp, regionName, serviceName) {
     const kDate = crypto.createHmac('sha256', `AWS4${key}`).update(dateStamp).digest();
@@ -184,17 +204,24 @@ function convertUint8ArrayToString(array) {
     return String.fromCharCode(...array);
 }
 
+const ws = new WebSocket(signedUrl, { headers: webSocketHeaders });
+
 function startStreamingTranscription() {
+
 
     ws.on('open', () => {
         console.log('Successfully connected to AWS Transcribe with a valid signature.');
-        // Stream the audio file
-        const readStream = fs.createReadStream(audioFilePath);
-        readStream.on('data', (chunk) => {
-            ws.send(chunk);
-        });
-        readStream.on('end', () => {
-            ws.send(JSON.stringify({ 'action': 'end' }));
+        myEmitter.on('audioPathReady', (audioFilePath) => {
+            // Ensure the audio file path is available
+            console.log(`Starting to stream the file: ${audioFilePath}`);
+    
+            const readStream = fs.createReadStream(audioFilePath);
+            readStream.on('data', (chunk) => {
+                ws.send(chunk);
+            });
+            readStream.on('end', () => {
+                ws.send(JSON.stringify({ 'action': 'end' }));
+            });
         });
     });
 
@@ -210,7 +237,20 @@ function startStreamingTranscription() {
             // Further processing...
         });
     });
-    
+
+    ws.on('error', error => console.error('WebSocket error:', error));
+    ws.on('close', () => {
+        codec.endOfStream();
+        // Handle any remaining messages
+        const remainingMessages = codec.getAvailableMessages();
+        remainingMessages.getMessages().forEach((decodedMessage) => {
+            console.log('Final Message:', decodedMessage);
+        });
+    });
+}
+
+startStreamingTranscription();
+
     // this need to be a decoder function to interprut aws transcribes binary data format
 
     // const messageDecoder = new MessageDecoderStream({
@@ -230,18 +270,7 @@ function startStreamingTranscription() {
     //     }
     // });
 
-    ws.on('error', error => console.error('WebSocket error:', error));
-    ws.on('close', () => {
-        codec.endOfStream();
-        // Handle any remaining messages
-        const remainingMessages = codec.getAvailableMessages();
-        remainingMessages.getMessages().forEach((decodedMessage) => {
-            console.log('Final Message:', decodedMessage);
-        });
-    });
-
-    
-//// decode the dataframe
+    //// decode the dataframe
     // ws.on('message', async (data) => {
     //     console.log('Data received:', data);
     
@@ -270,7 +299,3 @@ function startStreamingTranscription() {
     //         console.error('Received data is not a buffer.');
     //     }
     // });
-
-}
-// Start the transcription process
-startStreamingTranscription();
